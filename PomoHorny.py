@@ -19,38 +19,51 @@ def play_audio(audio_path):
         time.sleep(0.1)
 
 def play_video(video_path, gui_root, iconify):
-    """Play the selected video file with VLC, including video and audio."""
+    """Play the selected video file with VLC and disable user interaction with the GUI."""
     if not os.path.exists(video_path):
         print(f"Error: The file at {video_path} does not exist.")
         return
 
-    # Minimize or destroy the GUI based on the user's choice
+    # Minimize or withdraw the GUI based on the user's choice
     if iconify:
         gui_root.iconify()
     else:
         gui_root.withdraw()
 
-    # Create an untargetable VLC player
-    player = vlc.MediaPlayer(video_path)
-    player.set_fullscreen(True)
-    player.play()
-    time.sleep(1)
+    # Create a new top-level window for fullscreen and control video display
+    top = tk.Toplevel(gui_root)
+    top.attributes("-fullscreen", True)  # Make the window fullscreen
+    top.attributes("-topmost", True)     # Keep it always on top
 
-    # Set the window to be untargetable by the user
-    player.video_set_mouse_input(False)
-    player.video_set_key_input(False)
+    top.attributes("-disabled", True)    # Disable all user input on this window
+    top.configure(bg="black")             # Set background color to black (optional)
+    top.config(cursor="none")             # Hide the cursor during video playback
+
+
+    # Create VLC MediaPlayer and play the video
+    player = vlc.MediaPlayer(video_path)
+
+    # Use the top-level window's handle (ID) to make the video fit inside this window
+    player.set_hwnd(top.winfo_id())  # Bind the VLC window to the top-level window
+
+    # Start the video in fullscreen mode
+    player.play()
+    time.sleep(1)  # Allow some time for the video to start
 
     if player.get_state() == vlc.State.Error:
         print(f"Error: Unable to play the video at {video_path}.")
+        top.destroy()  # Close the top-level window if there's an error
         gui_root.deiconify()
         return
 
-    # Wait until the video finishes playing or the program is stopped
+    # Wait until the video finishes playing or until the program is stopped
     while player.is_playing() and not stop_program:
         time.sleep(1)
 
     player.stop()
-    gui_root.deiconify()  # Restore GUI after the video finishes
+    top.destroy()  # Close the top-level window when the video finishes
+    gui_root.deiconify()  # Restore the original GUI window
+
 
 def get_random_video_path(folder_path):
     """Get a random video file path from the selected folder."""

@@ -2,128 +2,165 @@ import vlc
 import time
 import os
 import tkinter as tk
-from tkinter import simpledialog, filedialog
+from tkinter import filedialog, messagebox
 import pygame
 import random
+import threading
+
+# Global flag to stop the program and video playback
+stop_program = False
 
 def play_audio(audio_path):
-    # Initialize pygame mixer
+    """Play the alarm audio file (using pygame for audio only)."""
     pygame.mixer.init()
-
-    # Load the audio file
     pygame.mixer.music.load(audio_path)
-
-    # Play the audio file
     pygame.mixer.music.play()
-
-    # Wait until the audio finishes playing
     while pygame.mixer.music.get_busy():
         time.sleep(0.1)
 
-def play_video(video_path):
-    # Check if the video file exists
+def play_video(video_path, gui_root, iconify):
+    """Play the selected video file with VLC, including video and audio."""
     if not os.path.exists(video_path):
         print(f"Error: The file at {video_path} does not exist.")
         return
 
-    # Create an instance of the VLC player
+    # Minimize or destroy the GUI based on the user's choice
+    if iconify:
+        gui_root.iconify()
+    else:
+        gui_root.withdraw()
+
+    # Create an untargetable VLC player
     player = vlc.MediaPlayer(video_path)
-
-    # Set the player to full-screen mode
     player.set_fullscreen(True)
-
-    # Play the video
     player.play()
-
-    # Add a delay to ensure the player starts
     time.sleep(1)
 
-    # Check for errors
+    # Set the window to be untargetable by the user
+    player.video_set_mouse_input(False)
+    player.video_set_key_input(False)
+
     if player.get_state() == vlc.State.Error:
         print(f"Error: Unable to play the video at {video_path}.")
+        gui_root.deiconify()
         return
 
-    # Wait until the video finishes playing
-    while player.is_playing():
+    # Wait until the video finishes playing or the program is stopped
+    while player.is_playing() and not stop_program:
         time.sleep(1)
 
-    # Stop the player and close the window
     player.stop()
+    gui_root.deiconify()  # Restore GUI after the video finishes
 
 def get_random_video_path(folder_path):
-    # Get a list of all video files in the folder and subfolders
-    video_files = []
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            if file.endswith(('.mp4', '.avi', '.mkv')):
-                video_files.append(os.path.join(root, file))
-    # Select a random video file
+    """Get a random video file path from the selected folder."""
+    video_files = [os.path.join(root, file)
+                   for root, dirs, files in os.walk(folder_path)
+                   for file in files if file.endswith(('.mp4', '.avi', '.mkv'))]
     return random.choice(video_files) if video_files else None
 
 def select_video_folder():
+    """Open file dialog to select a video folder."""
     global video_folder
     video_folder = filedialog.askdirectory(title="Select Video Folder")
     if not video_folder:
         print("No video folder selected.")
 
 def select_audio_file():
+    """Open file dialog to select an audio file."""
     global audio_path
     audio_path = filedialog.askopenfilename(title="Select Audio File", filetypes=[("Audio Files", "*.mp3 *.wav")])
     if not audio_path:
         print("No audio file selected.")
+
+def start_playback(gui_root, interval_minutes, iconify):
+    """Start playback of audio and video after the specified interval."""
+    global stop_program
+
+    while True:
+        countdown = int(interval_minutes * 60)
+        while countdown > 0 and not stop_program:
+            time.sleep(1)
+            countdown -= 1
+
+        if stop_program:  # If stop_program is set, stop the countdown
+            return
+
+        # Play the alarm audio
+        play_audio(audio_path)
+
+        # After alarm, select a random video and play it
+        video_path = get_random_video_path(video_folder)
+        if video_path:
+            play_video(video_path, gui_root, iconify)
+
+def panic():
+    """Stop the program and all actions."""
+    global stop_program
+    stop_program = True
+    print("Panic button pressed! Stopping program and video playback.")
+    messagebox.showinfo("Panic!", "The program has been stopped.")
+
+def on_close(root):
+    """Handle window close action to confirm exit."""
+    result = messagebox.askyesno("Exit", "Are you sure you want to exit?")
+    if result:
+        panic()  # Stop everything if confirmed
+        root.quit()  # Close the window
+        root.destroy()  # Destroy the root window
 
 def main():
     global video_folder, audio_path
     video_folder = None
     audio_path = None
 
-    # Create a Tkinter root window
     root = tk.Tk()
-    root.withdraw()  # Hide the root window
+    root.title("Media Player Setup")
 
-    # Create a new window for selecting files
-    file_select_window = tk.Toplevel(root)
-    file_select_window.title("Select Files")
-
-    # Add buttons to select video folder and audio file
-    select_video_button = tk.Button(file_select_window, text="Select Video Folder", command=select_video_folder)
+    # Video folder selection button
+    select_video_button = tk.Button(root, text="Select Video Folder", command=select_video_folder)
     select_video_button.pack(pady=10)
 
-    select_audio_button = tk.Button(file_select_window, text="Select Audio File", command=select_audio_file)
+    # Audio file selection button
+    select_audio_button = tk.Button(root, text="Select Audio File", command=select_audio_file)
     select_audio_button.pack(pady=10)
 
-    # Add a button to start the main process
-    start_button = tk.Button(file_select_window, text="Start", command=file_select_window.destroy)
+    # Interval entry
+    interval_label = tk.Label(root, text="Enter the interval in minutes:")
+    interval_label.pack(pady=10)
+    interval_entry = tk.Entry(root)
+    interval_entry.pack(pady=10)
+
+    # Option to minimize or withdraw the GUI
+    iconify_var = tk.BooleanVar(value=True)
+    iconify_check = tk.Checkbutton(root, text="Minimize GUI while playing", variable=iconify_var)
+    iconify_check.pack(pady=10)
+
+    # Panic button to stop the program
+    panic_button = tk.Button(root, text="Panic! Stop Program", command=panic)
+    panic_button.pack(pady=10)
+
+    def start():
+        global stop_program
+        stop_program = False
+        try:
+            interval_minutes = float(interval_entry.get())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid interval provided.")
+            return
+        if not video_folder or not audio_path:
+            messagebox.showerror("Error", "Video folder or audio file not selected.")
+            return
+        threading.Thread(target=start_playback, args=(root, interval_minutes, iconify_var.get()), daemon=True).start()
+        root.iconify()  # Minimize the GUI window after start
+
+    start_button = tk.Button(root, text="Start", command=start)
     start_button.pack(pady=10)
 
-    root.wait_window(file_select_window)
+    # Override the window close (X) button behavior
+    root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
 
-    if not video_folder or not audio_path:
-        print("Video folder or audio file not selected. Exiting.")
-        return
-
-    # Ask the user for the interval in minutes
-    interval_minutes = simpledialog.askfloat("Input", "Enter the interval in minutes:", minvalue=0.01)
-    if interval_minutes is None:
-        print("No interval provided. Exiting.")
-        return
-
-    while True:
-        time.sleep(interval_minutes * 60)
-        # Create a new Tkinter window to be on top and full screen
-        top = tk.Toplevel()
-        top.attributes("-fullscreen", True)  # Full screen
-        top.attributes("-topmost", True)  # Always on top
-        top.attributes("-disabled", True)  # Disable user input
-        top.withdraw()  # Hide the window
-        play_audio(audio_path)  # Play the audio
-        video_path = get_random_video_path(video_folder)  # Get a random video file
-        if video_path:
-            print(f"Playing video: {video_path}")
-            play_video(video_path)  # Play the video
-        else:
-            print("No video files found.")
-        top.destroy()  # Destroy the window after the video is played
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
